@@ -2,40 +2,25 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { useCreateConversation } from "#/hooks/mutation/use-create-conversation";
-// Removed useRepositoryBranches import - GitBranchDropdown manages its own data
 import { useIsCreatingConversation } from "#/hooks/use-is-creating-conversation";
-import { Branch, GitRepository } from "#/types/git";
 import { BrandButton } from "../settings/brand-button";
-import { useUserProviders } from "#/hooks/use-user-providers";
-import { Provider } from "#/types/settings";
 import { I18nKey } from "#/i18n/declaration";
-import RepoForkedIcon from "#/icons/repo-forked.svg?react";
-import { GitProviderDropdown } from "./git-provider-dropdown";
-import { GitBranchDropdown } from "./git-branch-dropdown";
-import { GitRepoDropdown } from "./git-repo-dropdown";
-import { useHomeStore } from "#/stores/home-store";
+import FolderIcon from "#/icons/folder.svg?react";
+import { LocalPathInput } from "./local-path-input";
 
 interface RepositorySelectionFormProps {
-  onRepoSelection: (repo: GitRepository | null) => void;
+  onPathSelection: (path: string) => void;
   isLoadingSettings?: boolean;
 }
 
 export function RepositorySelectionForm({
-  onRepoSelection,
+  onPathSelection,
   isLoadingSettings = false,
 }: RepositorySelectionFormProps) {
   const navigate = useNavigate();
 
-  const [selectedRepository, setSelectedRepository] =
-    React.useState<GitRepository | null>(null);
-  const [selectedBranch, setSelectedBranch] = React.useState<Branch | null>(
-    null,
-  );
-  const [selectedProvider, setSelectedProvider] =
-    React.useState<Provider | null>(null);
+  const [selectedPath, setSelectedPath] = React.useState<string>("");
 
-  const { providers } = useUserProviders();
-  const { addRecentRepository } = useHomeStore();
   const {
     mutate: createConversation,
     isPending,
@@ -46,117 +31,34 @@ export function RepositorySelectionForm({
 
   const { t } = useTranslation();
 
-  // Auto-select provider if there's only one
-  React.useEffect(() => {
-    if (providers.length === 1 && !selectedProvider) {
-      setSelectedProvider(providers[0]);
-    }
-  }, [providers, selectedProvider]);
-
   // We check for isSuccess because the app might require time to render
   // into the new conversation screen after the conversation is created.
   const isCreatingConversation =
     isPending || isSuccess || isCreatingConversationElsewhere;
 
-  // Branch selection is now handled by GitBranchDropdown component
-
-  const handleProviderSelection = (provider: Provider | null) => {
-    if (provider === selectedProvider) {
-      return;
-    }
-
-    setSelectedProvider(provider);
-    setSelectedRepository(null); // Reset repository selection when provider changes
-    setSelectedBranch(null); // Reset branch selection when provider changes
-    onRepoSelection(null); // Reset parent component's selected repo
-  };
-
-  const handleBranchSelection = React.useCallback((branch: Branch | null) => {
-    setSelectedBranch(branch);
-  }, []);
-
-  // Render the provider dropdown
-  const renderProviderSelector = () => {
-    // Only render if there are multiple providers
-    if (providers.length <= 1) {
-      return null;
-    }
-
-    return (
-      <GitProviderDropdown
-        providers={providers}
-        value={selectedProvider}
-        placeholder="Select Provider"
-        className="max-w-[500px]"
-        onChange={handleProviderSelection}
-        disabled={isLoadingSettings}
-      />
-    );
-  };
-
-  // Render the repository selector using our new component
-  const renderRepositorySelector = () => {
-    const handleRepoSelection = (repository?: GitRepository) => {
-      if (repository) {
-        onRepoSelection(repository);
-        setSelectedRepository(repository);
-      } else {
-        onRepoSelection(null); // Notify parent component that repo was cleared
-        setSelectedRepository(null);
-        setSelectedBranch(null);
-      }
-    };
-
-    return (
-      <GitRepoDropdown
-        provider={selectedProvider || providers[0]}
-        value={selectedRepository?.id || null}
-        repositoryName={selectedRepository?.full_name || null}
-        placeholder="user/repo"
-        disabled={!selectedProvider || isLoadingSettings}
-        onChange={handleRepoSelection}
-        className="max-w-auto"
-      />
-    );
-  };
-
-  // Render the branch selector
-  const renderBranchSelector = () => {
-    const defaultBranch = selectedRepository?.main_branch || null;
-    return (
-      <GitBranchDropdown
-        repository={selectedRepository?.full_name || null}
-        provider={selectedProvider || providers[0]}
-        selectedBranch={selectedBranch}
-        onBranchSelect={handleBranchSelection}
-        defaultBranch={defaultBranch}
-        placeholder="Select branch..."
-        className="max-w-[500px]"
-        disabled={!selectedRepository || isLoadingSettings}
-      />
-    );
+  const handlePathChange = (path: string) => {
+    setSelectedPath(path);
+    onPathSelection(path);
   };
 
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-[10px] pb-4">
-          <RepoForkedIcon width={24} height={24} />
+          <FolderIcon width={24} height={24} />
           <span className="leading-5 font-bold text-base text-white">
-            {t(I18nKey.COMMON$OPEN_REPOSITORY)}
+            {t(I18nKey.HOME$SELECT_OR_INSERT_URL)}
           </span>
         </div>
       </div>
 
       <div className="flex flex-col gap-[10px] pb-4">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-white font-normal leading-[22px]">
-            {t(I18nKey.HOME$SELECT_OR_INSERT_URL)}
-          </span>
-          {renderProviderSelector()}
-        </div>
-        {renderRepositorySelector()}
-        {renderBranchSelector()}
+        <LocalPathInput
+          value={selectedPath}
+          onChange={handlePathChange}
+          disabled={isLoadingSettings}
+          className="max-w-auto"
+        />
       </div>
 
       <BrandButton
@@ -164,25 +66,12 @@ export function RepositorySelectionForm({
         variant="primary"
         type="button"
         isDisabled={
-          !selectedRepository ||
-          !selectedBranch ||
-          isCreatingConversation ||
-          (providers.length > 1 && !selectedProvider) ||
-          isLoadingSettings
+          !selectedPath.trim() || isCreatingConversation || isLoadingSettings
         }
         onClick={() => {
-          // Persist the repository to recent repositories when launching
-          if (selectedRepository) {
-            addRecentRepository(selectedRepository);
-          }
-
           createConversation(
             {
-              repository: {
-                name: selectedRepository?.full_name || "",
-                gitProvider: selectedRepository?.git_provider || "github",
-                branch: selectedBranch?.name || "main",
-              },
+              localPath: selectedPath,
             },
             {
               onSuccess: (data) =>

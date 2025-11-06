@@ -14,6 +14,7 @@ interface CreateConversationVariables {
     gitProvider: Provider;
     branch?: string;
   };
+  localPath?: string;
   suggestedTask?: SuggestedTask;
   conversationInstructions?: string;
   createMicroagent?: CreateMicroagent;
@@ -40,6 +41,7 @@ export const useCreateConversation = () => {
       const {
         query,
         repository,
+        localPath,
         suggestedTask,
         conversationInstructions,
         createMicroagent,
@@ -56,6 +58,7 @@ export const useCreateConversation = () => {
           repository?.branch,
           conversationInstructions,
           undefined, // trigger - will be set by backend
+          localPath,
         );
 
         // Return a special task ID that the frontend will recognize
@@ -79,6 +82,7 @@ export const useCreateConversation = () => {
         repository?.branch,
         conversationInstructions,
         createMicroagent,
+        localPath,
       );
 
       return {

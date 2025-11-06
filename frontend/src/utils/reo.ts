@@ -41,6 +41,7 @@ class ReoService {
         this.initialized = true;
       }
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("Failed to initialize Reo.dev tracking:", error);
     }
   }
@@ -78,6 +79,7 @@ class ReoService {
    */
   identify(identity: ReoIdentity): void {
     if (!this.initialized) {
+      // eslint-disable-next-line no-console
       console.warn("Reo.dev not initialized. Call init() first.");
       return;
     }
@@ -87,6 +89,7 @@ class ReoService {
         window.Reo.identify(identity);
       }
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("Failed to identify user in Reo.dev:", error);
     }
   }

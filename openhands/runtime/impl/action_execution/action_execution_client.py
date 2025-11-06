@@ -18,6 +18,7 @@ from openhands.core.config.mcp_config import (
 from openhands.core.exceptions import (
     AgentRuntimeTimeoutError,
 )
+from openhands.core.logger import openhands_logger
 from openhands.events import EventStream
 from openhands.events.action import (
     ActionConfirmationStatus,
@@ -126,7 +127,19 @@ class ActionExecutionClient(Runtime):
         Raises:
             AgentRuntimeError: If the request fails
         """
-        return send_request(self.session, method, url, **kwargs)
+        openhands_logger.debug(f'Sending {method} request to: {url}')
+        if 'timeout' in kwargs:
+            openhands_logger.debug(f'Request timeout: {kwargs["timeout"]}s')
+
+        try:
+            response = send_request(self.session, method, url, **kwargs)
+            openhands_logger.debug(
+                f'Request completed with status: {response.status_code}'
+            )
+            return response
+        except Exception as e:
+            openhands_logger.error(f'Request failed to {url}: {e}')
+            raise
 
     def check_if_alive(self) -> None:
         request_url = f'{self.action_execution_server_url}/alive'
@@ -274,10 +287,16 @@ class ActionExecutionClient(Runtime):
             return ''
 
     def send_action_for_execution(self, action: Action) -> Observation:
+        openhands_logger.info(
+            f'Executing action: {type(action).__name__} (ID: {action.id})'
+        )
+        openhands_logger.debug(f'Action details: {action.__dict__}')
+
         if (
             isinstance(action, FileEditAction)
             and action.impl_source == FileEditSource.LLM_BASED_EDIT
         ):
+            openhands_logger.info('Using LLM-based edit for FileEditAction')
             return self.llm_based_edit(action)
 
         # set timeout to default if not set
@@ -286,30 +305,55 @@ class ActionExecutionClient(Runtime):
                 raise RuntimeError('Blocking command with no timeout set')
             # We don't block the command if this is a default timeout action
             action.set_hard_timeout(self.config.sandbox.timeout, blocking=False)
+            openhands_logger.debug(
+                f'Set default timeout: {self.config.sandbox.timeout}s'
+            )
+        else:
+            openhands_logger.debug(f'Using provided timeout: {action.timeout}s')
 
+        openhands_logger.debug('Acquiring action semaphore for exclusive execution')
         with self.action_semaphore:
+            openhands_logger.debug('Action semaphore acquired, starting execution')
+
             if not action.runnable:
+                openhands_logger.debug(
+                    f'Action {type(action).__name__} is not runnable, returning null observation'
+                )
                 if isinstance(action, AgentThinkAction):
                     return AgentThinkObservation('Your thought has been logged.')
                 return NullObservation('')
+
             if (
                 hasattr(action, 'confirmation_state')
                 and action.confirmation_state
                 == ActionConfirmationStatus.AWAITING_CONFIRMATION
             ):
+                openhands_logger.debug(
+                    f'Action {type(action).__name__} is awaiting confirmation'
+                )
                 return NullObservation('')
-            action_type = action.action  # type: ignore[attr-defined]
+
+            action_type = type(action).__name__.lower().replace('action', '')
             if action_type not in ACTION_TYPE_TO_CLASS:
+                openhands_logger.error(f'Action type {action_type} does not exist')
                 raise ValueError(f'Action {action_type} does not exist.')
+
             if not hasattr(self, action_type):
+                openhands_logger.error(
+                    f'Action type {action_type} is not supported in current runtime'
+                )
                 return ErrorObservation(
                     f'Action {action_type} is not supported in the current runtime.',
                     error_id='AGENT_ERROR$BAD_ACTION',
                 )
+
             if (
                 getattr(action, 'confirmation_state', None)
                 == ActionConfirmationStatus.REJECTED
             ):
+                openhands_logger.warning(
+                    f'Action {type(action).__name__} has been rejected by user'
+                )
                 return UserRejectObservation(
                     'Action has been rejected by the user! Waiting for further user input.'
                 )
@@ -317,9 +361,16 @@ class ActionExecutionClient(Runtime):
             assert action.timeout is not None
 
             try:
+                openhands_logger.debug(
+                    f'Sending action to execution server: {self.action_execution_server_url}/execute_action'
+                )
                 execution_action_body: dict[str, Any] = {
                     'action': event_to_dict(action),
                 }
+                openhands_logger.debug(
+                    f'Action execution body prepared, timeout: {action.timeout + 5}s'
+                )
+
                 response = self._send_action_server_request(
                     'POST',
                     f'{self.action_execution_server_url}/execute_action',
@@ -327,16 +378,34 @@ class ActionExecutionClient(Runtime):
                     # wait a few more seconds to get the timeout error from client side
                     timeout=action.timeout + 5,
                 )
+
+                openhands_logger.debug(
+                    f'Received response from execution server, status: {response.status_code}'
+                )
                 assert response.is_closed
                 output = response.json()
+
                 if getattr(action, 'hidden', False):
                     output.get('extras')['hidden'] = True
+
                 obs = observation_from_dict(output)
                 obs._cause = action.id  # type: ignore[attr-defined]
-            except httpx.TimeoutException:
+                openhands_logger.info(
+                    f'Action {type(action).__name__} completed successfully, observation type: {obs.__class__.__name__}'
+                )
+
+            except httpx.TimeoutException as e:
+                openhands_logger.error(
+                    f'Action {type(action).__name__} timed out after {action.timeout}s: {e}'
+                )
                 raise AgentRuntimeTimeoutError(
                     f'Runtime failed to return execute_action before the requested timeout of {action.timeout}s'
                 )
+            except Exception as e:
+                openhands_logger.error(
+                    f'Error executing action {type(action).__name__}: {e}'
+                )
+                raise
             finally:
                 update_last_execution_time()
             return obs

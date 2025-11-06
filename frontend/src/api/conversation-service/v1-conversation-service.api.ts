@@ -61,6 +61,7 @@ class V1ConversationService {
     selected_branch?: string,
     conversationInstructions?: string,
     trigger?: ConversationTrigger,
+    localPath?: string,
   ): Promise<V1AppConversationStartTask> {
     const body: V1AppConversationStartRequest = {
       selected_repository: selectedRepository,
@@ -68,6 +69,7 @@ class V1ConversationService {
       selected_branch,
       title: conversationInstructions,
       trigger,
+      local_path: localPath,
     };
 
     // Add initial message if provided

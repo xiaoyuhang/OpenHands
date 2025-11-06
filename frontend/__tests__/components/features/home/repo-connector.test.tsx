@@ -15,7 +15,7 @@ const renderRepoConnector = () => {
   const mockRepoSelection = vi.fn();
   const RouterStub = createRoutesStub([
     {
-      Component: () => <RepoConnector onRepoSelection={mockRepoSelection} />,
+      Component: () => <RepoConnector onPathSelection={mockRepoSelection} />,
       path: "/",
     },
     {
