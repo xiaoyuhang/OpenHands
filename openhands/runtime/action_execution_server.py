@@ -13,11 +13,13 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from zipfile import ZipFile
 
+import psutil
 import puremagic
 from binaryornot.check import is_binary
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
@@ -177,26 +179,45 @@ class ActionExecutor:
         enable_browser: bool,
         browsergym_eval_env: str | None,
     ) -> None:
+        logger.info(
+            f'Initializing ActionExecutor with work_dir: {work_dir}, username: {username}, user_id: {user_id}'
+        )
+        logger.info(
+            f'Browser enabled: {enable_browser}, browsergym_eval_env: {browsergym_eval_env}'
+        )
+        logger.info(f'Plugins to load: {[plugin.name for plugin in plugins_to_load]}')
+
         self.plugins_to_load = plugins_to_load
         self._initial_cwd = work_dir
         self.username = username
         self.user_id = user_id
+
+        logger.info('Initializing user and working directory')
         _updated_user_id = init_user_and_working_directory(
             username=username, user_id=self.user_id, initial_cwd=work_dir
         )
         if _updated_user_id is not None:
+            logger.info(f'User ID updated from {self.user_id} to {_updated_user_id}')
             self.user_id = _updated_user_id
+        else:
+            logger.info(f'User ID remains: {self.user_id}')
 
+        logger.info('Setting up ActionExecutor components')
         self.bash_session: BashSession | 'WindowsPowershellSession' | None = None  # type: ignore[name-defined]
         self.lock = asyncio.Lock()
         self.plugins: dict[str, Plugin] = {}
         self.file_editor = OHEditor(workspace_root=self._initial_cwd)
+        logger.info(f'File editor initialized with workspace root: {self._initial_cwd}')
+
         self.enable_browser = enable_browser
         self.browser: BrowserEnv | None = None
         self.browser_init_task: asyncio.Task | None = None
         self.browsergym_eval_env = browsergym_eval_env
 
         if (not self.enable_browser) and self.browsergym_eval_env:
+            logger.error(
+                'Browser environment is not enabled in config, but browsergym_eval_env is set'
+            )
             raise BrowserUnavailableException(
                 'Browser environment is not enabled in config, but browsergym_eval_env is set'
             )
@@ -206,6 +227,7 @@ class ActionExecutor:
         self._initialized = False
         self.downloaded_files: list[str] = []
         self.downloads_directory = '/workspace/.downloads'
+        logger.info(f'Downloads directory set to: {self.downloads_directory}')
 
         self.max_memory_gb: int | None = None
         if _override_max_memory_gb := os.environ.get('RUNTIME_MAX_MEMORY_GB', None):
@@ -216,11 +238,14 @@ class ActionExecutor:
         else:
             logger.info('No max memory limit set, using all available system memory')
 
-        self.memory_monitor = MemoryMonitor(
-            enable=os.environ.get('RUNTIME_MEMORY_MONITOR', 'False').lower()
-            in ['true', '1', 'yes']
-        )
+        memory_monitor_enabled = os.environ.get(
+            'RUNTIME_MEMORY_MONITOR', 'False'
+        ).lower() in ['true', '1', 'yes']
+        logger.info(f'Memory monitoring enabled: {memory_monitor_enabled}')
+        self.memory_monitor = MemoryMonitor(enable=memory_monitor_enabled)
         self.memory_monitor.start_monitoring()
+
+        logger.info('ActionExecutor initialization completed successfully')
 
     @property
     def initial_cwd(self):
@@ -652,6 +677,10 @@ class ActionExecutor:
 
 if __name__ == '__main__':
     logger.warning('Starting Action Execution Server')
+    logger.info(f'Python version: {sys.version}')
+    logger.info(f'Platform: {sys.platform}')
+    logger.info(f'Process ID: {os.getpid()}')
+
     parser = argparse.ArgumentParser()
     parser.add_argument('port', type=int, help='Port to listen on')
     parser.add_argument('--working-dir', type=str, help='Working directory')
@@ -675,6 +704,10 @@ if __name__ == '__main__':
 
     # example: python client.py 8000 --working-dir /workspace --plugins JupyterRequirement
     args = parser.parse_args()
+    logger.info(
+        f'Server arguments - port: {args.port}, working_dir: {args.working_dir}, username: {args.username}, user_id: {args.user_id}'
+    )
+    logger.info(f'Browser enabled: {args.enable_browser}, plugins: {args.plugins}')
 
     # Start the file viewer server in a separate thread
     logger.info('Starting file viewer server')
@@ -686,18 +719,78 @@ if __name__ == '__main__':
 
     plugins_to_load: list[Plugin] = []
     if args.plugins:
+        logger.info(f'Loading {len(args.plugins)} plugins: {args.plugins}')
         for plugin in args.plugins:
             if plugin not in ALL_PLUGINS:
+                logger.error(
+                    f'Plugin {plugin} not found in available plugins: {list(ALL_PLUGINS.keys())}'
+                )
                 raise ValueError(f'Plugin {plugin} not found')
+            logger.info(f'Loading plugin: {plugin}')
             plugins_to_load.append(ALL_PLUGINS[plugin]())  # type: ignore
+    else:
+        logger.info('No plugins specified to load')
 
     client: ActionExecutor | None = None
     mcp_proxy_manager: MCPProxyManager | None = None
+
+    # Resource monitoring function
+    def monitor_resources():
+        """Monitor system resources and log warnings if they get too high."""
+        while True:
+            try:
+                # Get current process
+                process = psutil.Process()
+
+                # Memory usage
+                memory_info = process.memory_info()
+                memory_percent = process.memory_percent()
+
+                # CPU usage
+                cpu_percent = process.cpu_percent()
+
+                # System-wide stats
+                system_memory = psutil.virtual_memory()
+                system_cpu = psutil.cpu_percent()
+
+                # Log resource usage every 30 seconds
+                logger.info(
+                    f'Resource usage - Memory: {memory_percent:.1f}% ({memory_info.rss / 1024 / 1024:.1f}MB), CPU: {cpu_percent:.1f}%'
+                )
+                logger.info(
+                    f'System resources - Memory: {system_memory.percent:.1f}%, CPU: {system_cpu:.1f}%'
+                )
+
+                # Warn if resources are high
+                if memory_percent > 80:
+                    logger.warning(f'High memory usage: {memory_percent:.1f}%')
+                if cpu_percent > 80:
+                    logger.warning(f'High CPU usage: {cpu_percent:.1f}%')
+                if system_memory.percent > 90:
+                    logger.warning(
+                        f'System memory critically high: {system_memory.percent:.1f}%'
+                    )
+
+                # Check for thread count
+                thread_count = threading.active_count()
+                if thread_count > 50:
+                    logger.warning(f'High thread count: {thread_count}')
+
+            except Exception as e:
+                logger.error(f'Error monitoring resources: {e}')
+
+            time.sleep(30)  # Monitor every 30 seconds
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         global client, mcp_proxy_manager
         logger.info('Initializing ActionExecutor...')
+
+        # Start resource monitoring thread
+        logger.info('Starting resource monitoring thread...')
+        monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
+        monitor_thread.start()
+
         client = ActionExecutor(
             plugins_to_load,
             work_dir=args.working_dir,
@@ -1070,9 +1163,16 @@ if __name__ == '__main__':
             logger.exception(f'Error listing files: {e}')
             return JSONResponse(content=[])
 
-    logger.debug(f'Starting action execution API on port {args.port}')
+    logger.info(f'Starting action execution API on port {args.port}')
+    logger.info('Server will bind to host: 0.0.0.0')
+
     # When LOG_JSON=1, provide a JSON log config to Uvicorn so error/access logs are structured
     log_config = None
-    if os.getenv('LOG_JSON', '0') in ('1', 'true', 'True'):
+    json_logging_enabled = os.getenv('LOG_JSON', '0') in ('1', 'true', 'True')
+    logger.info(f'JSON logging enabled: {json_logging_enabled}')
+    if json_logging_enabled:
         log_config = get_uvicorn_json_log_config()
+        logger.info('Using JSON log configuration for uvicorn')
+
+    logger.info('Starting uvicorn server...')
     run(app, host='0.0.0.0', port=args.port, log_config=log_config, use_colors=False)

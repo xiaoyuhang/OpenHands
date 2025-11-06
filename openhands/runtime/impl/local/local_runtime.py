@@ -147,7 +147,22 @@ class LocalRuntime(ActionExecutionClient):
         user_id: str | None = None,
         git_provider_tokens: PROVIDER_TOKEN_TYPE | None = None,
     ) -> None:
+        logger.info(f'Initializing LocalRuntime with session ID: {sid}')
+        logger.info(
+            f'Runtime configuration - headless_mode: {headless_mode}, attach_to_existing: {attach_to_existing}'
+        )
+        logger.info(
+            f'Plugins requested: {[p.name for p in plugins] if plugins else "None"}'
+        )
+        logger.info(
+            f'Environment variables provided: {len(env_vars) if env_vars else 0} variables'
+        )
+
         self.is_windows = sys.platform == 'win32'
+        logger.info(
+            f'Platform detected: {"Windows" if self.is_windows else "Unix-like"}'
+        )
+
         if self.is_windows:
             logger.warning(
                 'Running on Windows - some features that require tmux will be limited. '
@@ -156,6 +171,9 @@ class LocalRuntime(ActionExecutionClient):
 
         self.config = config
         self._user_id, self._username = get_user_info()
+        logger.info(
+            f'User information - ID: {self._user_id}, Username: {self._username}'
+        )
 
         logger.warning(
             'Initializing LocalRuntime. WARNING: NO SANDBOX IS USED. '
@@ -183,9 +201,15 @@ class LocalRuntime(ActionExecutionClient):
 
         # Update env vars
         if self.config.sandbox.runtime_startup_env_vars:
+            logger.info(
+                f'Updating environment with {len(self.config.sandbox.runtime_startup_env_vars)} startup variables'
+            )
             os.environ.update(self.config.sandbox.runtime_startup_env_vars)
+        else:
+            logger.debug('No runtime startup environment variables to set')
 
         # Initialize the action_execution_server
+        logger.info('Initializing ActionExecutionClient parent class')
         super().__init__(
             config,
             event_stream,
@@ -204,8 +228,15 @@ class LocalRuntime(ActionExecutionClient):
         session_api_key = os.getenv('SESSION_API_KEY')
         self._session_api_key: str | None = None
         if session_api_key:
+            logger.info(
+                'Session API key found in environment, configuring authentication'
+            )
             self.session.headers['X-Session-API-Key'] = session_api_key
             self._session_api_key = session_api_key
+        else:
+            logger.debug('No session API key found in environment')
+
+        logger.info('LocalRuntime initialization completed successfully')
 
     @property
     def session_api_key(self) -> str | None:
@@ -217,13 +248,18 @@ class LocalRuntime(ActionExecutionClient):
 
     async def connect(self) -> None:
         """Start the action_execution_server on the local machine or connect to an existing one."""
+        logger.info(f'Starting connection process for session {self.sid}')
         self.set_runtime_status(RuntimeStatus.STARTING_RUNTIME)
 
         # Get environment variables for warm server configuration
         desired_num_warm_servers = int(os.getenv('DESIRED_NUM_WARM_SERVERS', '0'))
+        logger.info(
+            f'Warm server configuration - desired count: {desired_num_warm_servers}, available: {len(_WARM_SERVERS)}'
+        )
 
         # Check if there's already a server running for this session ID
         if self.sid in _RUNNING_SERVERS:
+            logger.info(f'Found existing server for session {self.sid}')
             self.log('info', f'Connecting to existing server for session {self.sid}')
             server_info = _RUNNING_SERVERS[self.sid]
             self.server_process = server_info.process
@@ -239,6 +275,9 @@ class LocalRuntime(ActionExecutionClient):
             self.api_url = (
                 f'{self.config.sandbox.local_runtime_url}:{self._execution_server_port}'
             )
+            logger.info(
+                f'Reusing existing server - port: {self._execution_server_port}, workspace: {server_info.workspace_mount_path}'
+            )
         elif self.attach_to_existing:
             # If we're supposed to attach to an existing server but none exists, raise an error
             self.log('error', f'No existing server found for session {self.sid}')
@@ -246,8 +285,12 @@ class LocalRuntime(ActionExecutionClient):
                 f'No existing server found for session {self.sid}'
             )
         else:
+            logger.info('Setting up new server and workspace')
             # Set up workspace directory
             if self.config.workspace_base is not None:
+                logger.info(
+                    f'Using configured workspace base: {self.config.workspace_base}'
+                )
                 logger.warning(
                     f'Workspace base path is set to {self.config.workspace_base}. '
                     'It will be used as the path for the agent to run in. '
@@ -257,6 +300,9 @@ class LocalRuntime(ActionExecutionClient):
                 self._temp_workspace = None
             else:
                 # A temporary directory is created for the agent to run in
+                logger.info(
+                    'No workspace base configured, creating temporary directory'
+                )
                 logger.warning(
                     'Workspace base path is NOT set. Agent will run in a temporary directory.'
                 )
@@ -264,6 +310,7 @@ class LocalRuntime(ActionExecutionClient):
                     prefix=f'openhands_workspace_{self.sid}',
                 )
                 self.config.workspace_mount_path_in_sandbox = self._temp_workspace
+                logger.info(f'Created temporary workspace: {self._temp_workspace}')
 
             logger.info(
                 f'Using workspace directory: {self.config.workspace_mount_path_in_sandbox}'
@@ -272,10 +319,16 @@ class LocalRuntime(ActionExecutionClient):
             # Check if we have a warm server available
             warm_server_available = False
             if _WARM_SERVERS and not self.attach_to_existing:
+                logger.info(
+                    f'Attempting to use warm server from pool of {len(_WARM_SERVERS)} available'
+                )
                 try:
                     # Pop a warm server from the list
                     self.log('info', 'Using a warm server')
                     server_info = _WARM_SERVERS.pop(0)
+                    logger.info(
+                        f'Retrieved warm server - port: {server_info.execution_server_port}, PID: {server_info.process.pid}'
+                    )
 
                     # Use the warm server
                     self.server_process = server_info.process
@@ -421,36 +474,61 @@ class LocalRuntime(ActionExecutionClient):
     )
     def _wait_until_alive(self) -> bool:
         """Wait until the server is ready to accept requests."""
+        logger.info(f'Checking if server is alive at {self.api_url}/alive')
+
         if self.server_process and self.server_process.poll() is not None:
-            raise RuntimeError('Server process died')
+            exit_code = self.server_process.poll()
+            logger.error(f'Server process died with exit code: {exit_code}')
+            raise RuntimeError(f'Server process died with exit code: {exit_code}')
 
         try:
             response = self.session.get(f'{self.api_url}/alive')
             response.raise_for_status()
+            logger.info(f'Server is alive and responding at {self.api_url}')
             return True
         except Exception as e:
+            logger.debug(f'Server not ready yet: {e}')
             self.log('debug', f'Server not ready yet: {e}')
             raise
 
     async def execute_action(self, action: Action) -> Observation:
         """Execute an action by sending it to the server."""
+        logger.debug(f'Executing action: {action.__class__.__name__}')
+
         if not self.runtime_initialized:
+            logger.error('Runtime not initialized when trying to execute action')
             raise AgentRuntimeDisconnectedError('Runtime not initialized')
 
         # Check if our server process is still valid
         if self.server_process is None:
+            logger.warning('Server process is None, checking global dictionary')
             # Check if there's a server in the global dictionary
             if self.sid in _RUNNING_SERVERS:
                 self.server_process = _RUNNING_SERVERS[self.sid].process
+                logger.info(
+                    f'Recovered server process from global dictionary for sid: {self.sid}'
+                )
             else:
+                logger.error(
+                    f'Server process not found in global dictionary for sid: {self.sid}'
+                )
                 raise AgentRuntimeDisconnectedError('Server process not found')
 
         # Check if the server process is still running
         if self.server_process.poll() is not None:
+            exit_code = self.server_process.poll()
+            logger.error(
+                f'Server process died with exit code: {exit_code} for sid: {self.sid}'
+            )
             # If the process died, remove it from the global dictionary
             if self.sid in _RUNNING_SERVERS:
                 del _RUNNING_SERVERS[self.sid]
-            raise AgentRuntimeDisconnectedError('Server process died')
+                logger.info(
+                    f'Removed dead server from global dictionary for sid: {self.sid}'
+                )
+            raise AgentRuntimeDisconnectedError(
+                f'Server process died with exit code: {exit_code}'
+            )
 
         with self.action_semaphore:
             try:
@@ -501,13 +579,30 @@ class LocalRuntime(ActionExecutionClient):
             del _RUNNING_SERVERS[self.sid]
 
         if self.server_process:
+            logger.info(f'Terminating server process PID: {self.server_process.pid}')
             self.server_process.terminate()
             try:
-                self.server_process.wait(timeout=5)
+                exit_code = self.server_process.wait(timeout=5)
+                logger.info(
+                    f'Server process terminated gracefully with exit code: {exit_code}'
+                )
             except subprocess.TimeoutExpired:
+                logger.warning(
+                    f'Server process PID {self.server_process.pid} did not terminate gracefully, killing it'
+                )
                 self.server_process.kill()
+                try:
+                    exit_code = self.server_process.wait(timeout=2)
+                    logger.info(f'Server process killed with exit code: {exit_code}')
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        f'Failed to kill server process PID {self.server_process.pid}'
+                    )
             self.server_process = None
+            logger.info('Waiting for log thread to finish...')
             self._log_thread.join(timeout=5)  # Add timeout to join
+            if self._log_thread.is_alive():
+                logger.warning('Log thread did not finish within timeout')
 
         # Clean up temp workspace if it exists and we created it
         if self._temp_workspace and not self.attach_to_existing:
@@ -685,6 +780,12 @@ def _create_server(
 
     logger.debug(f'Updated PATH for subprocesses: {env["PATH"]}')
 
+    logger.info('Creating subprocess with PID tracking enabled')
+    logger.info(f'Working directory: {code_repo_path}')
+    logger.info(
+        'Environment variables set: PYTHONPATH, OPENHANDS_REPO_PATH, LOCAL_RUNTIME_MODE, VSCODE_PORT'
+    )
+
     server_process = subprocess.Popen(  # noqa: S603
         cmd,
         stdout=subprocess.PIPE,
@@ -695,11 +796,16 @@ def _create_server(
         cwd=code_repo_path,
     )
 
+    logger.info(f'Server process created with PID: {server_process.pid}')
+    logger.info(f'Server process command: {" ".join(cmd)}')
+
     log_thread_exit_event = threading.Event()
 
     # Start a thread to read and log server output
     def log_output() -> None:
+        logger.info(f'Starting log output thread for server PID: {server_process.pid}')
         if not server_process or not server_process.stdout:
+            logger.error('server process or stdout not available for logging.')
             logger.error('server process or stdout not available for logging.')
             return
 
@@ -708,14 +814,21 @@ def _create_server(
             while server_process.poll() is None:
                 if log_thread_exit_event.is_set():
                     logger.info('server log thread received exit signal.')
+                    logger.info('server log thread received exit signal.')
                     break
                 line = server_process.stdout.readline()
                 if not line:
                     break
                 logger.info(f'server: {line.strip()}')
 
+            # Check final process status
+            exit_code = server_process.poll()
+            if exit_code is not None and exit_code != 0:
+                logger.error(f'Server process exited with non-zero code: {exit_code}')
+
             # Capture any remaining output
             if not log_thread_exit_event.is_set():
+                logger.info('server process exited, reading remaining output.')
                 logger.info('server process exited, reading remaining output.')
                 for line in server_process.stdout:
                     if log_thread_exit_event.is_set():
