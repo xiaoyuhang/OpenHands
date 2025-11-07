@@ -490,9 +490,15 @@ class AgentSession:
             )
             memory.load_user_workspace_microagents(microagents)
 
+            # Set repository info for both git repositories and local paths
             if selected_repository and repo_directory:
                 memory.set_repository_info(
                     selected_repository, repo_directory, selected_branch
+                )
+            elif repo_directory:
+                # For local paths, use the directory name as repo name
+                memory.set_repository_info(
+                    f'local:{repo_directory}', repo_directory, None
                 )
         return memory
 
