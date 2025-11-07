@@ -333,7 +333,7 @@ class ActionExecutionClient(Runtime):
                 )
                 return NullObservation('')
 
-            action_type = type(action).__name__.lower().replace('action', '')
+            action_type = action.action  # type: ignore[attr-defined]
             if action_type not in ACTION_TYPE_TO_CLASS:
                 openhands_logger.error(f'Action type {action_type} does not exist')
                 raise ValueError(f'Action {action_type} does not exist.')
