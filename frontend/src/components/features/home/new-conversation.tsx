@@ -6,7 +6,11 @@ import { useCreateConversation } from "#/hooks/mutation/use-create-conversation"
 import { useIsCreatingConversation } from "#/hooks/use-is-creating-conversation";
 import PlusIcon from "#/icons/u-plus.svg?react";
 
-export function NewConversation() {
+interface NewConversationProps {
+  selectedPath?: string;
+}
+
+export function NewConversation({ selectedPath }: NewConversationProps) {
   const { t } = useTranslation();
 
   const navigate = useNavigate();
@@ -43,7 +47,7 @@ export function NewConversation() {
         type="button"
         onClick={() =>
           createConversation(
-            {},
+            { localPath: selectedPath },
             {
               onSuccess: (data) =>
                 navigate(`/conversations/${data.conversation_id}`),

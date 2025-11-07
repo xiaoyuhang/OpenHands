@@ -125,7 +125,7 @@ vi.mock("#/hooks/query/use-search-repositories", () => ({
 
 const mockOnRepoSelection = vi.fn();
 const renderForm = () =>
-  render(<RepositorySelectionForm onRepoSelection={mockOnRepoSelection} />, {
+  render(<RepositorySelectionForm onPathSelection={mockOnRepoSelection} />, {
     wrapper: ({ children }) => (
       <QueryClientProvider
         client={

@@ -245,6 +245,7 @@ class ConversationService {
     selected_branch?: string,
     conversationInstructions?: string,
     createMicroagent?: CreateMicroagent,
+    localPath?: string,
   ): Promise<Conversation> {
     const body = {
       repository: selectedRepository,
@@ -254,6 +255,7 @@ class ConversationService {
       suggested_task,
       conversation_instructions: conversationInstructions,
       create_microagent: createMicroagent,
+      local_path: localPath,
     };
 
     const { data } = await openHands.post<Conversation>(

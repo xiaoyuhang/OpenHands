@@ -29,6 +29,7 @@ export interface V1AppConversationStartRequest {
   title?: string | null;
   trigger?: ConversationTrigger | null;
   pr_number?: number[];
+  local_path?: string | null;
 }
 
 export type V1AppConversationStartTaskStatus =

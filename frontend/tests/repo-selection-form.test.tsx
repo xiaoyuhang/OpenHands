@@ -52,7 +52,7 @@ describe("RepositorySelectionForm", () => {
   });
 
   it("should clear selected branch when input is empty", async () => {
-    render(<RepositorySelectionForm onRepoSelection={mockOnRepoSelection} />);
+    render(<RepositorySelectionForm onPathSelection={mockOnRepoSelection} />);
 
     // First select a repository to enable the branch dropdown
     const repoDropdown = screen.getByTestId("repository-dropdown");
@@ -70,7 +70,7 @@ describe("RepositorySelectionForm", () => {
   });
 
   it("should clear selected branch when input contains only whitespace", async () => {
-    render(<RepositorySelectionForm onRepoSelection={mockOnRepoSelection} />);
+    render(<RepositorySelectionForm onPathSelection={mockOnRepoSelection} />);
 
     // First select a repository to enable the branch dropdown
     const repoDropdown = screen.getByTestId("repository-dropdown");
@@ -88,7 +88,7 @@ describe("RepositorySelectionForm", () => {
   });
 
   it("should keep branch empty after being cleared even with auto-selection", async () => {
-    render(<RepositorySelectionForm onRepoSelection={mockOnRepoSelection} />);
+    render(<RepositorySelectionForm onPathSelection={mockOnRepoSelection} />);
 
     // First select a repository to enable the branch dropdown
     const repoDropdown = screen.getByTestId("repository-dropdown");

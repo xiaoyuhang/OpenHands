@@ -47,7 +47,9 @@ class VSCodePlugin(Plugin):
             )
             return
 
-        if username not in filter(None, [RUNTIME_USERNAME, 'root', 'openhands']):
+        if username not in filter(
+            None, [RUNTIME_USERNAME, 'root', 'openhands', 'admin']
+        ):
             self.vscode_port = None
             self.vscode_connection_token = None
             logger.warning(
