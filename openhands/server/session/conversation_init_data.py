@@ -15,6 +15,7 @@ class ConversationInitData(Settings):
     selected_branch: str | None = Field(default=None)
     conversation_instructions: str | None = Field(default=None)
     git_provider: ProviderType | None = Field(default=None)
+    local_path: str | None = Field(default=None)
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,

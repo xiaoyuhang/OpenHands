@@ -38,6 +38,7 @@ async def initialize_conversation(
     selected_branch: str | None,
     conversation_trigger: ConversationTrigger = ConversationTrigger.GUI,
     git_provider: ProviderType | None = None,
+    local_path: str | None = None,
 ) -> ConversationMetadata:
     if conversation_id is None:
         conversation_id = uuid.uuid4().hex
@@ -61,6 +62,7 @@ async def initialize_conversation(
             selected_repository=selected_repository,
             selected_branch=selected_branch,
             git_provider=git_provider,
+            local_path=local_path,
         )
 
         await conversation_store.save_metadata(conversation_metadata)
@@ -129,6 +131,7 @@ async def start_conversation(
     session_init_args['selected_branch'] = conversation_metadata.selected_branch
     session_init_args['git_provider'] = conversation_metadata.git_provider
     session_init_args['conversation_instructions'] = conversation_instructions
+    session_init_args['local_path'] = conversation_metadata.local_path
     if mcp_config:
         session_init_args['mcp_config'] = mcp_config
 
@@ -175,6 +178,7 @@ async def create_new_conversation(
     git_provider: ProviderType | None = None,
     conversation_id: str | None = None,
     mcp_config: MCPConfig | None = None,
+    local_path: str | None = None,
 ) -> AgentLoopInfo:
     conversation_metadata = await initialize_conversation(
         user_id,
@@ -183,6 +187,7 @@ async def create_new_conversation(
         selected_branch,
         conversation_trigger,
         git_provider,
+        local_path,
     )
 
     return await start_conversation(

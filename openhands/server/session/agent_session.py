@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 from logging import LoggerAdapter
 from types import MappingProxyType
@@ -103,6 +104,7 @@ class AgentSession:
         initial_message: MessageAction | None = None,
         conversation_instructions: str | None = None,
         replay_json: str | None = None,
+        local_path: str | None = None,
     ) -> None:
         """Starts the Agent session
         Parameters:
@@ -140,11 +142,19 @@ class AgentSession:
                 custom_secrets=custom_secrets,
                 selected_repository=selected_repository,
                 selected_branch=selected_branch,
+                local_path=local_path,
             )
 
             repo_directory = None
-            if self.runtime and runtime_connected and selected_repository:
-                repo_directory = selected_repository.split('/')[-1]
+            if self.runtime and runtime_connected:
+                if selected_repository:
+                    repo_directory = selected_repository.split('/')[-1]
+                elif local_path:
+                    repo_directory = (
+                        os.path.basename(os.path.abspath(local_path))
+                        if os.path.isdir(local_path)
+                        else None
+                    )
 
             if git_provider_tokens:
                 provider_handler = ProviderHandler(provider_tokens=git_provider_tokens)
@@ -302,6 +312,7 @@ class AgentSession:
         custom_secrets: CUSTOM_SECRETS_TYPE | None = None,
         selected_repository: str | None = None,
         selected_branch: str | None = None,
+        local_path: str | None = None,
     ) -> bool:
         """Creates a runtime instance
 
@@ -372,9 +383,14 @@ class AgentSession:
                 )
             return False
 
-        await self.runtime.clone_or_init_repo(
-            git_provider_tokens, selected_repository, selected_branch
-        )
+        # Handle repository setup - either from git repository or local path
+        if local_path:
+            await self.runtime.copy_local_path_to_workspace(local_path)
+        else:
+            await self.runtime.clone_or_init_repo(
+                git_provider_tokens, selected_repository, selected_branch
+            )
+
         await call_sync_from_async(self.runtime.maybe_run_setup_script)
         await call_sync_from_async(self.runtime.maybe_setup_git_hooks)
 

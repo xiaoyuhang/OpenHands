@@ -497,6 +497,66 @@ class Runtime(FileEditRuntimeMixin):
 
         return dir_name
 
+    async def copy_local_path_to_workspace(
+        self,
+        local_path: str | None,
+    ) -> str:
+        """Copy files from a local path to the workspace.
+
+        Args:
+            local_path: The local path to copy from
+
+        Returns:
+            The directory name in the workspace where files were copied
+        """
+        if not local_path:
+            logger.info('No local path specified, skipping local path setup.')
+            return ''
+
+        if self.status_callback:
+            self.status_callback(
+                'info',
+                RuntimeStatus.SETTING_UP_WORKSPACE,
+                'Setting up workspace from local path...',
+            )
+
+        # Validate that the local path exists
+        if not os.path.exists(local_path):
+            raise ValueError(f'Local path does not exist: {local_path}')
+
+        # Get the directory name from the local path
+        dir_name = os.path.basename(os.path.abspath(local_path))
+        if not dir_name:
+            dir_name = 'local_workspace'
+
+        workspace_path = self.workspace_root / dir_name
+        quoted_workspace_path = shlex.quote(str(workspace_path))
+        quoted_local_path = shlex.quote(local_path)
+
+        # Copy the local path to the workspace
+        if os.path.isfile(local_path):
+            # If it's a single file, copy it to the workspace root
+            copy_command = (
+                f'cp {quoted_local_path} {shlex.quote(str(self.workspace_root))}'
+            )
+            dir_name = ''  # No directory created for single file
+        else:
+            # If it's a directory, copy the entire directory
+            copy_command = f'cp -r {quoted_local_path} {quoted_workspace_path}'
+
+        copy_action = CmdRunAction(command=copy_command)
+        self.log('info', f'Copying local path: {local_path} to workspace')
+        await call_sync_from_async(self.run_action, copy_action)
+
+        # Initialize git repository in the copied directory if it doesn't exist
+        if os.path.isdir(local_path) and self.config.init_git_in_empty_workspace:
+            git_init_command = f'cd {quoted_workspace_path} && git init && git config --global --add safe.directory {quoted_workspace_path}'
+            git_init_action = CmdRunAction(command=git_init_command)
+            await call_sync_from_async(self.run_action, git_init_action)
+            self.log('info', f'Initialized git repository in {workspace_path}')
+
+        return dir_name
+
     def maybe_run_setup_script(self):
         """Run .openhands/setup.sh if it exists in the workspace or repository."""
         setup_script = '.openhands/setup.sh'
